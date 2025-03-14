@@ -1,9 +1,12 @@
 from langchain_openai import ChatOpenAI
 import random
 import re
-from typing import Dict, List, Optional, Any, Tuple
+import os
+import requests
 import pygame
+from typing import Dict, List, Optional, Any, Tuple
 from game_ui import GameUI
+from image_generator import ImageGenerator
 
 
 class GameState:
@@ -23,6 +26,7 @@ class GameState:
         self.last_player_message: str = ""
         self.turn_summary: str = ""
         self.image_prompt: str = ""
+        self.current_image: Optional[pygame.Surface] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for UI updates."""
@@ -306,15 +310,31 @@ class ResponseParser:
 class Game:
     """Main game class that coordinates all game components."""
     def __init__(self):
+        # Check if OpenAI API key is available
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            print("Warning: OPENAI_API_KEY environment variable not set.")
+            print("Image generation will be disabled.")
+            print("Set it using: export OPENAI_API_KEY='your-api-key'")
+        
         self.llm = ChatOpenAI()
         self.story_generator = StoryGenerator(self.llm)
         self.turbulence_system = TurbulenceSystem(self.llm)
         self.state: Optional[GameState] = None
         self.ui = GameUI()
+        
+        # Initialize image generator if API key is available
+        self.image_generator = ImageGenerator(api_key) if api_key else None
+        self.image_generation_enabled = bool(api_key)
     
     def start_new_game(self):
         """Start a new game session."""
         self.ui.add_system_message("Welcome to the AI Text Adventure!")
+        if self.image_generation_enabled:
+            self.ui.add_system_message("Image generation is enabled. You'll see scenes visualized as you play.")
+        else:
+            self.ui.add_system_message("Image generation is disabled. Set OPENAI_API_KEY to enable it.")
+            
         self.ui.add_system_message("Enter your character name: ")
         self.ui.update_display({'health': 100, 'karma': 0, 'inventory': []})
         
@@ -358,6 +378,10 @@ class Game:
         
         # Extract possible starting items from the initial situation
         self._extract_initial_items(situation)
+        
+        # Generate initial image
+        if self.image_generation_enabled:
+            self._generate_scene_image(f"A scene depicting: {self.state.chosen_setting}. {situation}")
     
     def _extract_initial_items(self, situation: str):
         """Try to extract items mentioned in the initial situation to add to inventory."""
@@ -380,6 +404,52 @@ Return only a comma-separated list of items, nothing else.
                 self.ui.add_system_message(f"Starting items: {items_str}")
         except Exception as e:
             print(f"Error extracting initial items: {e}")
+    
+    def _generate_scene_image(self, prompt: str):
+        """Generate an image for the current scene and update the UI."""
+        if not self.image_generation_enabled or not self.image_generator:
+            return
+            
+        self.ui.add_system_message("Generating scene image...")
+        
+        try:
+            # Generate image
+            image = self.image_generator.generate_image(prompt)
+            
+            if image:
+                # Scale image to fit display area
+                scaled_image = self._scale_image_to_fit(image)
+                
+                # Update UI with new image
+                self.state.current_image = scaled_image
+                self.ui.current_image = scaled_image
+                self.ui.add_system_message("Scene image updated.")
+            else:
+                self.ui.add_system_message("Failed to generate scene image.")
+        except Exception as e:
+            print(f"Error generating scene image: {e}")
+            self.ui.add_system_message("Error generating scene image.")
+    
+    def _scale_image_to_fit(self, image: pygame.Surface) -> pygame.Surface:
+        """Scale image to fit in the UI's image area while maintaining aspect ratio."""
+        # Get the dimensions of the target area
+        target_width = self.ui.image_area.width
+        target_height = self.ui.image_area.height
+        
+        # Get original image dimensions
+        orig_width, orig_height = image.get_size()
+        
+        # Calculate scale factor
+        width_ratio = target_width / orig_width
+        height_ratio = target_height / orig_height
+        scale_factor = min(width_ratio, height_ratio)
+        
+        # Calculate new dimensions
+        new_width = int(orig_width * scale_factor)
+        new_height = int(orig_height * scale_factor)
+        
+        # Scale the image
+        return pygame.transform.scale(image, (new_width, new_height))
     
     def _load_random_setting(self):
         """Load a random setting from the settings file."""
@@ -533,6 +603,10 @@ END_LLM_GENERATED_CONTENT
         if removed_items:
             items_str = ", ".join(removed_items)
             self.ui.add_system_message(f"Removed from inventory: {items_str}")
+        
+        # Generate new scene image if image prompt is available
+        if self.image_generation_enabled and self.state.image_prompt:
+            self._generate_scene_image(self.state.image_prompt)
 
 
 if __name__ == "__main__":

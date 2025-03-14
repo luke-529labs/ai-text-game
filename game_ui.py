@@ -83,14 +83,17 @@ class GameUI:
         self.messages: List[Message] = []
         self.max_messages = 50
         
-        # Image area
+        # Image area - moved to right side
         self.image_area = pygame.Rect(
-            self.width - 300,
+            self.width - 320,
             self.padding + 80,  # Below status bars
-            280,
-            280
+            300,
+            300
         )
         self.current_image: Optional[pygame.Surface] = None
+        self.loading_animation_state = 0
+        self.last_animation_time = 0
+        self.is_loading_image = False
         
         # Frame rate control
         self.clock = pygame.time.Clock()
@@ -122,6 +125,12 @@ class GameUI:
     
     def add_system_message(self, message: str):
         """Add a system message to the display history."""
+        # Handle loading messages specially
+        if message == "Generating scene image...":
+            self.is_loading_image = True
+        elif message == "Scene image updated." or message == "Failed to generate scene image.":
+            self.is_loading_image = False
+            
         # Wrap text to fit the screen
         wrapped_text = textwrap.fill(message, width=80)
         for line in wrapped_text.split('\n'):
@@ -252,10 +261,11 @@ class GameUI:
     
     def draw_text_area(self):
         """Draw the main text area with message history."""
+        # Adjust text area to account for image area
         text_rect = pygame.Rect(
             250,
             self.padding,
-            self.width - 270 - self.padding,
+            self.width - 590,  # Leave room for image
             self.text_area_height - (2 * self.padding)
         )
         
@@ -314,15 +324,60 @@ class GameUI:
             (self.input_box.x + 5, self.input_box.y + (self.input_box.height - text_surface.get_height()) // 2)
         )
     
+    def _update_loading_animation(self):
+        """Update the loading animation state."""
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_animation_time > 300:  # Update every 300ms
+            self.loading_animation_state = (self.loading_animation_state + 1) % 4
+            self.last_animation_time = current_time
+    
     def draw_image_area(self):
-        """Draw the image area (placeholder for now)."""
+        """Draw the image area and current image if available."""
+        # Draw the background and border
+        border_rect = pygame.Rect(
+            self.image_area.x - 2,
+            self.image_area.y - 2,
+            self.image_area.width + 4,
+            self.image_area.height + 4
+        )
+        pygame.draw.rect(self.screen, Colors.LIGHT_GRAY, border_rect)
         pygame.draw.rect(self.screen, Colors.DARKER_GRAY, self.image_area)
         
+        # Draw scene title
+        title_rect = pygame.Rect(
+            self.image_area.x,
+            self.image_area.y - 30,
+            self.image_area.width,
+            25
+        )
+        self.header_font.render_to(
+            self.screen,
+            (title_rect.x, title_rect.y),
+            "CURRENT SCENE",
+            Colors.TEXT_COLOR
+        )
+        
         if self.current_image:
-            # If we have an image, display it
-            self.screen.blit(self.current_image, self.image_area)
+            # Calculate centered position for the image
+            img_w, img_h = self.current_image.get_size()
+            x_pos = self.image_area.x + (self.image_area.width - img_w) // 2
+            y_pos = self.image_area.y + (self.image_area.height - img_h) // 2
+            
+            # Display the image
+            self.screen.blit(self.current_image, (x_pos, y_pos))
+        elif self.is_loading_image:
+            # Show loading indicator
+            self._update_loading_animation()
+            dots = "." * self.loading_animation_state
+            loading_text = f"Generating image{dots}"
+            self.main_font.render_to(
+                self.screen,
+                (self.image_area.x + 10, self.image_area.y + self.image_area.height // 2),
+                loading_text,
+                Colors.TEXT_COLOR
+            )
         else:
-            # Draw placeholder text
+            # Show placeholder text
             self.main_font.render_to(
                 self.screen,
                 (self.image_area.x + 10, self.image_area.y + self.image_area.height // 2),
