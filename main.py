@@ -2,12 +2,19 @@ from langchain_openai import ChatOpenAI
 import random
 import re
 from typing import Dict, List, Optional, Any, Tuple
+import pygame
+from game_ui import GameUI
 
 
 class GameState:
     """Represents the current state of the game and player."""
     def __init__(self, name: str):
         self.name: str = name
+        self.reset_life_values()
+        self.chosen_setting: str = ""
+    
+    def reset_life_values(self):
+        """Reset values that should start fresh with each new life."""
         self.health: int = 100
         self.karma: int = 0
         self.inventory: List[str] = []
@@ -15,7 +22,19 @@ class GameState:
         self.last_gamemaster_message: str = ""
         self.last_player_message: str = ""
         self.turn_summary: str = ""
-        self.chosen_setting: str = ""
+        self.image_prompt: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert state to dictionary for UI updates."""
+        return {
+            'name': self.name,
+            'health': self.health,
+            'karma': self.karma,
+            'inventory': self.inventory,
+            'turn': self.turn,
+            'last_message': self.last_gamemaster_message,
+            'image_prompt': self.image_prompt
+        }
 
 
 class StoryGenerator:
@@ -28,14 +47,21 @@ class StoryGenerator:
         prompt = """
 You are a dungeon master for a text based RPG. You are given a setting and you need to generate a new situation for the player. 
 The player has just reincarnated into a new life and wakes up with no memories in the following setting: {setting}. 
-Give the player a brief intro based on the setting and a few directions that they might go with their new life. Be consise yet descriptive and ensure there are some unique choices which could lead to action. 
+Give the player a brief intro based on the setting and a few directions that they might go with their new life. Be consise yet descriptive and ensure there are some unique choices which could lead to action.
+
+IMPORTANT: Include at least one item that the player can find or already has at the beginning of this new life (e.g., a tool, weapon, key item, or clothing that fits the setting). This will be added to their starting inventory.
+
 Everything should be written in the second person. Please return only a player-facing message and nothing else.
 """.format(setting=setting)
         return self.llm.invoke(prompt).content
 
     def generate_narrative_element(self, state: GameState) -> Dict[str, str]:
         """Generate a context-aware narrative element to advance the story."""
-        element_type = random.choice(["CHOICE", "CHARACTER", "ACTION"])
+        # Occasionally focus on inventory-related elements
+        if random.random() < 0.3 and state.turn > 1:  # 30% chance after first turn
+            element_type = "ITEM"
+        else:
+            element_type = random.choice(["CHOICE", "CHARACTER", "ACTION"])
         
         prompt = """
 You are a narrative designer for a text-based RPG. Based on the current context, generate a {element_type}.
@@ -45,6 +71,7 @@ Last gamemaster message: {last_message}
 Player's last action: {last_action}
 Current inventory: {inventory}
 Current location/situation: {setting}
+Current turn: {turn}
 
 {specific_instructions}
 
@@ -55,10 +82,12 @@ Return only the narrative element, nothing else. Be concise but compelling.
             last_action=state.last_player_message,
             inventory=state.inventory,
             setting=state.chosen_setting,
+            turn=state.turn,
             specific_instructions={
                 "CHOICE": "Create a dilemma or choice the player must face. Format: 'You must decide: [brief compelling choice]'",
                 "CHARACTER": "Introduce a new character with a line of dialogue. Format: '[Character description]: \"[intriguing dialogue]\"'",
-                "ACTION": "Create a sudden action that demands player response. Format: 'Suddenly, [unexpected event or action]'"
+                "ACTION": "Create a sudden action that demands player response. Format: 'Suddenly, [unexpected event or action]'",
+                "ITEM": "Create a scenario involving inventory. Either: 1) A new item the player could find/receive, 2) A way to use an existing item, or 3) A challenge requiring a specific item. Format: '[Brief item-focused scenario]'"
             }[element_type]
         )
         
@@ -281,29 +310,76 @@ class Game:
         self.story_generator = StoryGenerator(self.llm)
         self.turbulence_system = TurbulenceSystem(self.llm)
         self.state: Optional[GameState] = None
+        self.ui = GameUI()
     
     def start_new_game(self):
         """Start a new game session."""
-        print("Welcome to the Text-Based RPG!")
-        player_name = input("Enter your character name: ")
-        self.state = GameState(player_name)
-        self._start_new_situation()
+        self.ui.add_system_message("Welcome to the AI Text Adventure!")
+        self.ui.add_system_message("Enter your character name: ")
+        self.ui.update_display({'health': 100, 'karma': 0, 'inventory': []})
         
-        try:
-            while True:
-                self._process_turn()
-        except KeyboardInterrupt:
-            print("\nThanks for playing!")
+        # Main game loop
+        running = True
+        name_entered = False
+        
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    break
+                
+                command = self.ui.handle_event(event)
+                if command is not None:
+                    if not name_entered:
+                        self.state = GameState(command)
+                        name_entered = True
+                        self.ui.add_system_message(f"Welcome, {command}!")
+                        self._start_new_situation()
+                    else:
+                        self.state.last_player_message = command
+                        self.ui.add_player_message(command)
+                        self._process_turn()
+                
+            self.ui.update_display(self.state.to_dict() if self.state else {})
+            
+        self.ui.cleanup()
     
     def _start_new_situation(self):
         """Initialize a new situation/life for the player."""
+        # Reset life-specific values
+        if self.state:
+            self.state.reset_life_values()
+            
         self._load_random_setting()
         situation = self.story_generator.generate_initial_situation(self.state.chosen_setting)
-        print("\nNew Situation:")
-        print(situation)
-        print("\n")
+        self.ui.add_system_message("\nNew Situation:")
+        self.ui.add_gamemaster_message(situation)
         self.state.last_gamemaster_message = situation
-        self._get_player_input()
+        
+        # Extract possible starting items from the initial situation
+        self._extract_initial_items(situation)
+    
+    def _extract_initial_items(self, situation: str):
+        """Try to extract items mentioned in the initial situation to add to inventory."""
+        # This is a simple implementation - the more sophisticated version would use the LLM
+        item_prompt = f"""
+You are an inventory manager for a text-based RPG. Given the following initial situation description, 
+identify 1-2 items that the player should logically start with or could immediately find.
+The items should be appropriate for the setting and could be useful for the adventure.
+
+Situation: {situation}
+
+Return only a comma-separated list of items, nothing else.
+"""
+        try:
+            items_response = self.llm.invoke(item_prompt).content.strip()
+            items = [item.strip() for item in items_response.split(',') if item.strip()]
+            if items:
+                self.state.inventory = items[:2]  # Limit to 2 items max
+                items_str = ", ".join(self.state.inventory)
+                self.ui.add_system_message(f"Starting items: {items_str}")
+        except Exception as e:
+            print(f"Error extracting initial items: {e}")
     
     def _load_random_setting(self):
         """Load a random setting from the settings file."""
@@ -326,16 +402,15 @@ class Game:
         
         # Check for death
         if self.state.health <= 0:
-            print("\nYou have died! Reincarnating into a new life...\n")
+            self.ui.add_system_message("\nYou have died! Reincarnating into a new life...\n")
             self._start_new_situation()
-        else:
-            self._get_player_input()
     
     def _handle_turbulence(self) -> Optional[Dict[str, Any]]:
         """Handle turbulence events if they occur."""
         if self.turbulence_system.should_add_turbulence(self.state.turn):
             result = self.turbulence_system.generate_turbulence_event(self.state)
-            print("\n⚠️ UNEXPECTED EVENT! ⚠️")
+            self.ui.add_system_message("\n⚠️ UNEXPECTED EVENT! ⚠️")
+            self.ui.add_system_message(result['event'])
             return result
         return None
     
@@ -365,6 +440,16 @@ class Game:
     def _build_turn_prompt(self, narrative_element: Dict[str, str], inventory_str: str,
                           turbulence: str, turbulence_instruction: str) -> str:
         """Build the prompt for the turn."""
+        # Add inventory-specific instructions based on the narrative element type
+        inventory_instruction = ""
+        if narrative_element['type'] == "ITEM":
+            inventory_instruction = """
+INVENTORY FOCUS: This turn should meaningfully interact with inventory items. Do ONE of the following:
+1. Add a new item to the player's inventory if appropriate
+2. Create an opportunity to use an existing item in the inventory
+3. Create a situation where an item would be useful (but they may not have it yet)
+"""
+        
         return """
 You are a skilled dungeon master for a text-based RPG. Your job is to create an engaging and dynamic story that responds to player choices while maintaining appropriate challenge and consequences.
 
@@ -378,6 +463,7 @@ IMPORTANT RULES:
 4. Maintain narrative continuity with previous events
 5. Be concise but descriptive
 6. For inventory items, use simple comma-separated text (e.g., "rusty sword, health potion, map")
+7. Regularly create opportunities for players to find, use, or lose inventory items{inventory_instruction}
 
 IMPORTANT: You must respond in the exact format specified below. Do not deviate from this format:
 
@@ -413,28 +499,40 @@ END_LLM_GENERATED_CONTENT
             turbulence=turbulence,
             turbulence_instruction=turbulence_instruction,
             narrative_element=narrative_element['content'],
-            element_type=narrative_element['type']
+            element_type=narrative_element['type'],
+            inventory_instruction=inventory_instruction
         )
     
     def _update_game_state(self, parsed_response: Dict[str, Any]):
         """Update the game state with the parsed response."""
+        # Check for inventory changes
+        old_inventory = set(self.state.inventory)
+        new_inventory = set(parsed_response['inventory'])
+        
+        # Detect added or removed items
+        added_items = new_inventory - old_inventory
+        removed_items = old_inventory - new_inventory
+        
+        # Update game state with parsed response
         self.state.health = parsed_response['health']
         self.state.inventory = parsed_response['inventory']
         self.state.karma = parsed_response['karma']
         self.state.last_gamemaster_message = parsed_response['gamemaster_message']
         self.state.turn_summary = parsed_response['turn_summary']
+        self.state.image_prompt = parsed_response.get('image_prompt', "A mysterious scene")
         self.state.turn += 1
         
-        # Display current state to player
-        print("\nGamemaster:", self.state.last_gamemaster_message)
-        print(f"\nStatus - Health: {self.state.health} | Karma: {self.state.karma}")
-        if self.state.inventory:
-            print("Inventory:", ", ".join(self.state.inventory))
-        print("\n")
-    
-    def _get_player_input(self):
-        """Get input from the player."""
-        self.state.last_player_message = input("What do you want to do? ")
+        # Display updates through UI
+        self.ui.add_gamemaster_message(self.state.last_gamemaster_message)
+        
+        # Notify about inventory changes
+        if added_items:
+            items_str = ", ".join(added_items)
+            self.ui.add_system_message(f"Added to inventory: {items_str}")
+        
+        if removed_items:
+            items_str = ", ".join(removed_items)
+            self.ui.add_system_message(f"Removed from inventory: {items_str}")
 
 
 if __name__ == "__main__":
