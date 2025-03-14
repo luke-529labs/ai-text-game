@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from game_ui import GameUI
 from image_generator import ImageGenerator
 from karma_manager import KarmaManager
+from health_manager import HealthManager
 
 
 class GameState:
@@ -323,6 +324,7 @@ class Game:
         self.story_generator = StoryGenerator(self.llm)
         self.turbulence_system = TurbulenceSystem(self.llm)
         self.karma_manager = KarmaManager(self.llm)
+        self.health_manager = HealthManager(self.llm)  # Add health manager
         self.state: Optional[GameState] = None
         self.ui = GameUI()
         
@@ -548,6 +550,28 @@ Return only a comma-separated list of items, nothing else.
     
     def _process_turn(self):
         """Process a single game turn."""
+        # Evaluate health for the player's action
+        health_context = {
+            'last_message': self.state.last_gamemaster_message,
+            'situation': self.state.chosen_setting,
+            'inventory': self.state.inventory
+        }
+        health_change, health_explanation, is_fatal = self.health_manager.evaluate_health_change(
+            self.state.last_player_message,
+            health_context
+        )
+        
+        # Update health before generating response
+        old_health = self.state.health
+        self.state.health = self.health_manager.calculate_final_health(old_health, health_change)
+        
+        # If there was a significant health change or healing attempt, notify the player
+        if abs(health_change) >= 10 or self.health_manager.is_healing_attempt(self.state.last_player_message):
+            if health_change > 0:
+                self.ui.add_system_message(f"Health +{health_change}: {health_explanation}")
+            elif health_change < 0:
+                self.ui.add_system_message(f"Health {health_change}: {health_explanation}")
+        
         # Evaluate karma for the player's action
         karma_context = {
             'last_message': self.state.last_gamemaster_message,
@@ -576,13 +600,18 @@ Return only a comma-separated list of items, nothing else.
         response = self._generate_turn_response(narrative_element, turbulence_result)
         parsed_response = ResponseParser.parse_response(response, self.state)
         
-        # Update game state but preserve our karma calculation
+        # Update game state but preserve our karma and health calculations
         saved_karma = self.state.karma
+        saved_health = self.state.health
         self._update_game_state(parsed_response)
         self.state.karma = saved_karma  # Keep our karma calculation instead of the LLM's
+        self.state.health = saved_health  # Keep our health calculation instead of the LLM's
         
         # Check for death
-        if self.state.health <= 0:
+        if self.state.health <= 0 or is_fatal:
+            if is_fatal:
+                self.state.health = 0  # Ensure health is 0 for fatal actions
+                self.ui.add_system_message(f"\nFatal: {health_explanation}")
             self.ui.add_system_message("\nYou have died! Reincarnating into a new life...\n")
             self._start_new_situation()
     
