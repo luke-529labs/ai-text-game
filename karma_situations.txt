@@ -1,0 +1,142 @@
+# VERY POSITIVE KARMA (karma > 75)
+[VERY_POSITIVE]
+Magical Academy of the Enlightened
+Floating Paradise Islands
+Crystal Palace of the Pure
+Celestial Gardens
+Ancient Temple of Light
+Utopian Sky City
+Sacred Healing Springs
+Elysian Fields of the Blessed
+Celestial Library of Infinite Knowledge
+Harmonious Future Metropolis
+Cloud Kingdom of the Virtuous
+Garden of Eternal Spring
+Sanctuary of the Enlightened Ones
+Floating Monastery of Peace
+Divine Observatory
+Golden Age Athens at its Peak
+Heaven's Gate Trading Post
+
+# POSITIVE KARMA (karma 35 to 75)
+[POSITIVE]
+Hidden Village of Magical Creatures
+Prosperous Trading Port
+Mystical Forest Sanctuary
+Peaceful Mountain Monastery
+Underwater City of the Wise
+Renaissance City of Arts
+Harmonious Space Colony
+Thriving Viking Settlement
+Ancient Egyptian Golden Age
+Peaceful Zen Garden Temple
+Advanced Medical Research Center
+Sustainable Eco-Village
+Prosperous Silk Road Oasis
+Enlightened Scholar's University
+Classical Rome's Golden Age
+Healing Hot Springs Resort
+Progressive Future Academy
+
+# SLIGHTLY POSITIVE KARMA (karma 1 to 35)
+[SLIGHTLY_POSITIVE]
+Medieval Fantasy Kingdom
+Steampunk Inventor's Workshop
+Archaeological Wonder
+Bustling Market Town
+Coastal Fishing Village
+Pioneer Settlement
+Ancient Greek Agora
+Busy Modern Coffee Shop
+Friendly Neighborhood Park
+Local Community Garden
+Small Town Festival
+Victorian Era Bookshop
+Modern Art Gallery
+Cozy Mountain Cabin
+Beachside Surf Town
+Family-Run Bakery
+Lively Street Market
+
+# NEUTRAL KARMA (karma 0)
+[NEUTRAL]
+Crossroads Inn
+Wandering Caravan
+Border Town Trading Post
+Mysterious Floating Island
+Remote Research Station
+Desert Oasis
+Mountain Pass Lodge
+Modern Office Building
+Busy Airport Terminal
+City Bus Station
+Suburban Shopping Mall
+Average High School
+Public Library
+Downtown Coffee Shop
+Hotel Lobby
+Medieval Tavern
+1950s Diner
+Contemporary Apartment Complex
+Train Station Platform
+Fast Food Restaurant
+
+# SLIGHTLY NEGATIVE KARMA (karma -35 to -1)
+[SLIGHTLY_NEGATIVE]
+Cyberpunk Slums
+Foggy Cemetery
+Run-Down Diner
+Abandoned Motel
+Cluttered Pawn Shop
+Graffiti-Covered Alley
+Rainy Gas Station
+Dimly Lit Subway Station
+Seedy Casino Back Room
+Industrial Factory Slums
+Struggling Mining Town
+Depression-Era Soup Kitchen
+Overcrowded Tenement
+Smoky Speakeasy
+Dark Web Cafe
+Rusty Cargo Ship
+Neglected Zoo
+
+# NEGATIVE KARMA (karma -75 to -35)
+[NEGATIVE]
+Post-Apocalyptic Wasteland
+Haunted Asylum
+Gothic Horror Castle
+Cursed Village
+WWI Trenches
+Bone-Choked Battlefield
+Twisted Carnival
+Plague-Ridden Medieval City
+Nuclear Test Site
+Abandoned Prison Complex
+Sinking Ghost Ship
+Corrupt Future Megacity
+Ancient Torture Chamber
+Dark Ages Dungeon
+Victorian Insane Asylum
+Zombie-Infested Mall
+Crumbling Space Station
+
+# VERY NEGATIVE KARMA (karma < -75)
+[VERY_NEGATIVE]
+Infernal Pit
+Void of Lost Souls
+Demon's Labyrinth
+Nightmare Realm
+Cursed Battlefield
+Shadow Dimension
+Realm of Eternal Torment
+Hellish War Zone
+Endless Catacombs of the Damned
+Corrupted Temple of Sacrifice
+Dimension of Eternal Darkness
+Toxic Wasteland of the Fallen
+Prison of Lost Souls
+The Abyss of Suffering
+Realm of Forgotten Nightmares
+Dark God's Throne Room
+Pit of the Condemned 

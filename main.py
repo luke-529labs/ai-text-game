@@ -8,19 +8,20 @@ import threading
 from typing import Dict, List, Optional, Any, Tuple
 from game_ui import GameUI
 from image_generator import ImageGenerator
+from karma_manager import KarmaManager
 
 
 class GameState:
     """Represents the current state of the game and player."""
     def __init__(self, name: str):
         self.name: str = name
-        self.reset_life_values()
+        self.karma: int = 0  # Karma is initialized only once and persists between lives
         self.chosen_setting: str = ""
+        self.reset_life_values()
     
     def reset_life_values(self):
         """Reset values that should start fresh with each new life."""
         self.health: int = 100
-        self.karma: int = 0
         self.inventory: List[str] = []
         self.turn: int = 0
         self.last_gamemaster_message: str = ""
@@ -321,6 +322,7 @@ class Game:
         self.llm = ChatOpenAI()
         self.story_generator = StoryGenerator(self.llm)
         self.turbulence_system = TurbulenceSystem(self.llm)
+        self.karma_manager = KarmaManager(self.llm)
         self.state: Optional[GameState] = None
         self.ui = GameUI()
         
@@ -370,12 +372,82 @@ class Game:
             
         self.ui.cleanup()
     
+    def _load_karma_based_setting(self) -> str:
+        """
+        Load a setting based on the player's karma level.
+        Returns the selected setting.
+        """
+        karma = self.state.karma
+        
+        # Define karma ranges
+        if karma > 75:
+            category = "VERY_POSITIVE"
+        elif karma > 35:
+            category = "POSITIVE"
+        elif karma > 0:
+            category = "SLIGHTLY_POSITIVE"
+        elif karma == 0:
+            category = "NEUTRAL"
+        elif karma >= -35:
+            category = "SLIGHTLY_NEGATIVE"
+        elif karma >= -75:
+            category = "NEGATIVE"
+        else:
+            category = "VERY_NEGATIVE"
+        
+        try:
+            # Read the karma situations file
+            with open('karma_situations.txt', 'r') as f:
+                content = f.read()
+            
+            # Split into sections and find our category
+            sections = content.split('[')
+            category_section = next(s for s in sections if s.startswith(category))
+            
+            # Extract situations from the category
+            situations = [
+                line.strip() for line in category_section.split('\n')[1:]  # Skip category name
+                if line.strip() and not line.strip().startswith('#')  # Skip comments and empty lines
+            ]
+            
+            # Select a random situation from the appropriate category
+            if situations:
+                chosen_setting = random.choice(situations)
+                karma_level = category.replace('_', ' ').title()
+                self.ui.add_system_message(f"\nYour karma level ({karma}) has led you to a {karma_level} realm...")
+                return chosen_setting
+                
+        except Exception as e:
+            print(f"Error loading karma-based setting: {e}")
+            # Fallback to neutral if there's an error
+            return "Crossroads Inn"
+    
+    def _load_random_setting(self):
+        """Load a setting based on karma."""
+        self.state.chosen_setting = self._load_karma_based_setting()
+        
     def _start_new_situation(self):
         """Initialize a new situation/life for the player."""
+        # Store karma before reset
+        current_karma = self.state.karma if self.state else 0
+        
         # Reset life-specific values
         if self.state:
             self.state.reset_life_values()
+            self.state.karma = current_karma  # Restore karma as it persists between lives
             
+            # Inform player about karma carrying over
+            if current_karma != 0:
+                karma_message = "positive" if current_karma > 0 else "negative"
+                self.ui.add_system_message(f"\nYour karma of {current_karma} carries over to your next life.")
+                if abs(current_karma) > 75:
+                    intensity = "profound"
+                elif abs(current_karma) > 35:
+                    intensity = "significant"
+                else:
+                    intensity = "subtle"
+                self.ui.add_system_message(f"Your {karma_message} karma will have a {intensity} influence on your next incarnation...")
+        
         self._load_random_setting()
         situation = self.story_generator.generate_initial_situation(self.state.chosen_setting)
         self.ui.add_system_message("\nNew Situation:")
@@ -474,14 +546,26 @@ Return only a comma-separated list of items, nothing else.
         # Scale the image
         return pygame.transform.scale(image, (new_width, new_height))
     
-    def _load_random_setting(self):
-        """Load a random setting from the settings file."""
-        with open('situations.txt', 'r') as f:
-            settings = [line.rstrip() for line in f.readlines()]
-        self.state.chosen_setting = random.choice(settings)
-    
     def _process_turn(self):
         """Process a single game turn."""
+        # Evaluate karma for the player's action
+        karma_context = {
+            'last_message': self.state.last_gamemaster_message,
+            'situation': self.state.chosen_setting
+        }
+        karma_change, karma_explanation = self.karma_manager.evaluate_karma_change(
+            self.state.last_player_message,
+            karma_context
+        )
+        
+        # Update karma before generating response
+        old_karma = self.state.karma
+        self.state.karma = self.karma_manager.calculate_final_karma(old_karma, karma_change)
+        
+        # If there was a significant karma change, notify the player
+        if abs(karma_change) >= 5:
+            self.ui.add_system_message(f"Karma {karma_change:+d}: {karma_explanation}")
+        
         # Generate narrative element
         narrative_element = self.story_generator.generate_narrative_element(self.state)
         
@@ -491,7 +575,11 @@ Return only a comma-separated list of items, nothing else.
         # Generate and process response
         response = self._generate_turn_response(narrative_element, turbulence_result)
         parsed_response = ResponseParser.parse_response(response, self.state)
+        
+        # Update game state but preserve our karma calculation
+        saved_karma = self.state.karma
         self._update_game_state(parsed_response)
+        self.state.karma = saved_karma  # Keep our karma calculation instead of the LLM's
         
         # Check for death
         if self.state.health <= 0:
