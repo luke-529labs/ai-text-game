@@ -23,6 +23,8 @@ class Colors:
     SYSTEM_TEXT = (200, 200, 200)  # Light gray for system messages
     INPUT_BOX_ACTIVE = (100, 100, 255)
     INPUT_BOX_INACTIVE = (70, 70, 70)
+    TRANSLUCENT_BLACK = (0, 0, 0, 180)  # For overlays
+    TRANSLUCENT_DARK = (20, 20, 20, 200)  # For overlays
 
 class MessageType:
     """Enum for message types"""
@@ -62,34 +64,84 @@ class GameUI:
         self.main_font = pygame.freetype.SysFont('Arial', 16)
         self.header_font = pygame.freetype.SysFont('Arial', 24)
         self.bold_font = pygame.freetype.SysFont('Arial', 16, bold=True)
+        self.small_font = pygame.freetype.SysFont('Arial', 14)
         
         # UI element dimensions
-        self.text_area_height = height * 0.6
+        self.padding = 10
         self.input_height = 40
-        self.status_height = 80
-        self.padding = 20
         
-        # Input box
+        # New layout with larger image and text areas
+        # Image area now takes up right half of screen
+        self.image_area = pygame.Rect(
+            self.width // 2 + self.padding,
+            self.padding,
+            (self.width // 2) - (self.padding * 2),
+            self.height - self.input_height - (self.padding * 3)
+        )
+        
+        # Small inventory in top-left corner
+        inventory_height = 150
+        self.inventory_area = pygame.Rect(
+            self.padding,
+            self.padding,
+            (self.width // 2) - (self.padding * 2),
+            inventory_height
+        )
+        
+        # Text area takes remaining left side space
+        self.text_area = pygame.Rect(
+            self.padding,
+            self.inventory_area.bottom + self.padding,
+            (self.width // 2) - (self.padding * 2),
+            self.height - self.inventory_area.height - self.input_height - (self.padding * 4)
+        )
+        
+        # Scroll buttons for text area
+        button_size = 30
+        self.scroll_up_button = pygame.Rect(
+            self.text_area.right - button_size - 5,
+            self.text_area.top + 5,
+            button_size,
+            button_size
+        )
+        
+        self.scroll_down_button = pygame.Rect(
+            self.text_area.right - button_size - 5,
+            self.text_area.bottom - button_size - 5,
+            button_size,
+            button_size
+        )
+        
+        # Scrollbar track between buttons
+        scrollbar_width = 6  # Thinner scrollbar
+        self.scrollbar_track = pygame.Rect(
+            self.text_area.right - scrollbar_width - 10,  # Move it a bit more to the right
+            self.scroll_up_button.bottom + 5,
+            scrollbar_width,
+            self.scroll_down_button.top - self.scroll_up_button.bottom - 10
+        )
+        
+        # Input box at bottom spans full width
         self.input_box = pygame.Rect(
             self.padding,
             self.height - self.input_height - self.padding,
-            self.width - (2 * self.padding),
+            self.width - (self.padding * 2),
             self.input_height
         )
+        
+        # Scrolling variables for text area
+        self.scroll_position = 0
+        self.max_scroll_position = 0
+        self.always_show_latest = True  # Flag to control auto-scrolling
+        
         self.input_text = ""
         self.input_active = False
         
         # Message history with type info
         self.messages: List[Message] = []
-        self.max_messages = 50
+        self.max_messages = 200  # Increased from 50 to allow for more history
         
-        # Image area - moved to right side
-        self.image_area = pygame.Rect(
-            self.width - 320,
-            self.padding + 80,  # Below status bars
-            300,
-            300
-        )
+        # Image loading state
         self.current_image: Optional[pygame.Surface] = None
         self.loading_animation_state = 0
         self.last_animation_time = 0
@@ -109,6 +161,29 @@ class GameUI:
                 self.input_active = True
             else:
                 self.input_active = False
+            
+            # Check if scroll buttons were clicked
+            if self.scroll_up_button.collidepoint(event.pos):
+                # Scroll up button should increase scroll_position (show older messages)
+                self.scroll_position = min(self.max_scroll_position, self.scroll_position + 5)
+                self.always_show_latest = False  # User manually scrolled
+            elif self.scroll_down_button.collidepoint(event.pos):
+                # Scroll down button should decrease scroll_position (show newer messages)
+                self.scroll_position = max(0, self.scroll_position - 5)
+                # If scrolled to bottom, re-enable auto-scrolling
+                if self.scroll_position <= 0:
+                    self.always_show_latest = True
+            
+            # Handle mouse wheel scrolling for text area
+            elif self.text_area.collidepoint(event.pos):
+                if event.button == 4:  # Scroll up
+                    self.scroll_position = max(0, self.scroll_position - 3)
+                    self.always_show_latest = False  # User manually scrolled
+                elif event.button == 5:  # Scroll down
+                    self.scroll_position = min(self.max_scroll_position, self.scroll_position + 3)
+                    # If scrolled to bottom, re-enable auto-scrolling
+                    if self.scroll_position >= self.max_scroll_position:
+                        self.always_show_latest = True
                 
         elif event.type == pygame.KEYDOWN:
             if self.input_active:
@@ -120,25 +195,48 @@ class GameUI:
                     self.input_text = self.input_text[:-1]
                 else:
                     self.input_text += event.unicode
+            
+            # Keyboard scrolling for text area
+            if event.key == pygame.K_PAGEUP:
+                self.scroll_position = max(0, self.scroll_position - 10)
+                self.always_show_latest = False
+            elif event.key == pygame.K_PAGEDOWN:
+                self.scroll_position = min(self.max_scroll_position, self.scroll_position + 10)
+                if self.scroll_position >= self.max_scroll_position:
+                    self.always_show_latest = True
+            elif event.key == pygame.K_HOME:
+                self.scroll_position = 0
+                self.always_show_latest = False
+            elif event.key == pygame.K_END:
+                self.scroll_position = self.max_scroll_position
+                self.always_show_latest = True
         
         return None
     
     def add_system_message(self, message: str):
         """Add a system message to the display history."""
-        # Handle loading messages specially
+        # Handle loading messages specially - but don't set flags directly
+        # (let the main game loop handle the state)
         if message == "Generating scene image...":
-            self.is_loading_image = True
+            # The flag is now set by the main game before calling this method
+            pass
         elif message == "Scene image updated." or message == "Failed to generate scene image.":
-            self.is_loading_image = False
+            # The flag is now cleared by the image generation thread
+            pass
             
         # Wrap text to fit the screen
-        wrapped_text = textwrap.fill(message, width=80)
+        wrapped_text = textwrap.fill(message, width=60)  # Adjusted for new width
         for line in wrapped_text.split('\n'):
             self.messages.append(Message(line, MessageType.SYSTEM))
         
         # Keep only the last max_messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages:]
+        
+        # Update scroll position if auto-scrolling is enabled
+        self._calculate_max_scroll_position()
+        # Always default to showing newest content (bottom of text)
+        self.scroll_position = 0
     
     def add_player_message(self, message: str):
         """Add a player message to the display history."""
@@ -146,13 +244,18 @@ class GameUI:
         formatted = f"You: {message}"
         
         # Wrap text to fit the screen
-        wrapped_text = textwrap.fill(formatted, width=80)
+        wrapped_text = textwrap.fill(formatted, width=60)  # Adjusted for new width
         for line in wrapped_text.split('\n'):
             self.messages.append(Message(line, MessageType.PLAYER))
         
         # Keep only the last max_messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages:]
+        
+        # Update scroll position if auto-scrolling is enabled
+        self._calculate_max_scroll_position()
+        # Always default to showing newest content (bottom of text)
+        self.scroll_position = 0
     
     def add_gamemaster_message(self, message: str):
         """Add a gamemaster message to the display history."""
@@ -160,40 +263,63 @@ class GameUI:
         formatted = f"Gamemaster: {message}"
         
         # Wrap text to fit the screen
-        wrapped_text = textwrap.fill(formatted, width=80)
+        wrapped_text = textwrap.fill(formatted, width=60)  # Adjusted for new width
         for line in wrapped_text.split('\n'):
             self.messages.append(Message(line, MessageType.GAMEMASTER))
         
         # Keep only the last max_messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages:]
+        
+        # Update scroll position if auto-scrolling is enabled
+        self._calculate_max_scroll_position()
+        # Always default to showing newest content (bottom of text)
+        self.scroll_position = 0
     
     def add_message(self, message: str):
         """Legacy method - adds a system message for backward compatibility."""
         self.add_system_message(message)
     
-    def draw_status_bars(self, health: int, karma: int):
-        """Draw health and karma bars."""
-        # Health bar
-        bar_width = 200
-        bar_height = 20
-        x = self.width - bar_width - self.padding
-        y = self.padding
+    def _calculate_max_scroll_position(self):
+        """Calculate the maximum scroll position based on message count."""
+        line_height = 25
+        total_message_height = len(self.messages) * line_height
+        visible_height = self.text_area.height - 20
         
-        # Draw health bar with label
-        pygame.draw.rect(self.screen, Colors.DARK_GRAY, (x, y, bar_width, bar_height))
+        if total_message_height > visible_height:
+            self.max_scroll_position = (total_message_height - visible_height) // line_height
+        else:
+            self.max_scroll_position = 0
+    
+    def draw_status_bars(self, health: int, karma: int):
+        """Draw health and karma bars overlaid on image area."""
+        # Create a translucent background for the status bars
+        status_surface = pygame.Surface((200, 75), pygame.SRCALPHA)  # Increased height
+        status_surface.fill((0, 0, 0, 180))  # Translucent black
+        
+        # Position in top-right corner of image area
+        status_x = self.image_area.right - 210
+        status_y = self.image_area.top + 10
+        
+        # Draw health bar
+        bar_width = 180
+        bar_height = 15
+        bar_x = 10
+        bar_y = 5
+        
+        pygame.draw.rect(status_surface, Colors.DARK_GRAY, (bar_x, bar_y, bar_width, bar_height))
         health_width = (bar_width * health) // 100
-        pygame.draw.rect(self.screen, Colors.HEALTH_BAR, (x, y, health_width, bar_height))
+        pygame.draw.rect(status_surface, Colors.HEALTH_BAR, (bar_x, bar_y, health_width, bar_height))
         
         health_text = f"Health: {health}"
-        self.bold_font.render_to(self.screen, (x - 100, y), health_text, Colors.TEXT_COLOR)
+        self.small_font.render_to(status_surface, (bar_x, bar_y + bar_height + 2), health_text, Colors.TEXT_COLOR)
         
-        # Karma bar
-        y += bar_height + 10
-        pygame.draw.rect(self.screen, Colors.DARK_GRAY, (x, y, bar_width, bar_height))
+        # Karma bar - moved down for more space
+        bar_y += bar_height + 25  # Increased spacing
+        pygame.draw.rect(status_surface, Colors.DARK_GRAY, (bar_x, bar_y, bar_width, bar_height))
         
         # Calculate karma position and color
-        mid_point = x + (bar_width // 2)
+        mid_point = bar_x + (bar_width // 2)
         if karma >= 0:
             karma_width = (bar_width // 2) * karma // 100
             karma_color = Colors.KARMA_BAR_POSITIVE
@@ -204,87 +330,173 @@ class GameUI:
             karma_x = mid_point - karma_width
         
         # Draw the karma bar
-        pygame.draw.rect(self.screen, karma_color, (karma_x, y, karma_width, bar_height))
+        pygame.draw.rect(status_surface, karma_color, (karma_x, bar_y, karma_width, bar_height))
         
         # Draw center line and markers
-        pygame.draw.line(self.screen, Colors.WHITE, (mid_point, y), (mid_point, y + bar_height), 1)
+        pygame.draw.line(status_surface, Colors.WHITE, (mid_point, bar_y), (mid_point, bar_y + bar_height), 1)
         
         # Draw karma value
         karma_text = f"Karma: {karma}"
-        self.bold_font.render_to(self.screen, (x - 100, y), karma_text, Colors.TEXT_COLOR)
+        self.small_font.render_to(status_surface, (bar_x, bar_y + bar_height + 2), karma_text, Colors.TEXT_COLOR)
+        
+        # Blit the status surface onto the main screen
+        self.screen.blit(status_surface, (status_x, status_y))
     
     def draw_inventory(self, inventory: List[str]):
-        """Draw the inventory panel."""
-        inventory_rect = pygame.Rect(
-            self.padding,
-            self.padding,
-            200,
-            self.text_area_height - (2 * self.padding)
-        )
-        
-        pygame.draw.rect(self.screen, Colors.DARKER_GRAY, inventory_rect)
+        """Draw a smaller inventory panel."""
+        pygame.draw.rect(self.screen, Colors.DARKER_GRAY, self.inventory_area)
         
         # Draw header with background
         header_rect = pygame.Rect(
-            inventory_rect.x,
-            inventory_rect.y,
-            inventory_rect.width,
-            40
+            self.inventory_area.x,
+            self.inventory_area.y,
+            self.inventory_area.width,
+            30
         )
         pygame.draw.rect(self.screen, Colors.DARK_GRAY, header_rect)
         
         self.header_font.render_to(
             self.screen,
-            (inventory_rect.x + 10, inventory_rect.y + 10),
+            (self.inventory_area.x + 10, self.inventory_area.y + 5),
             "INVENTORY",
             Colors.TEXT_COLOR
         )
         
-        # Draw items
-        y = inventory_rect.y + 50
+        # Draw items in a more compact format
+        y = self.inventory_area.y + 40
         if not inventory:
             self.main_font.render_to(
                 self.screen,
-                (inventory_rect.x + 20, y),
+                (self.inventory_area.x + 20, y),
                 "Empty",
                 Colors.GRAY
             )
         else:
-            for item in inventory:
-                self.main_font.render_to(
-                    self.screen,
-                    (inventory_rect.x + 20, y),
-                    f"• {item}",
-                    Colors.TEXT_COLOR
-                )
-                y += 30
+            # Draw items in a grid-like layout if there are many
+            item_width = 180
+            items_per_row = max(1, self.inventory_area.width // item_width)
+            
+            for i, item in enumerate(inventory):
+                col = i % items_per_row
+                row = i // items_per_row
+                
+                x = self.inventory_area.x + 10 + (col * item_width)
+                item_y = y + (row * 25)
+                
+                if item_y < self.inventory_area.bottom - 15:  # Ensure it's visible
+                    self.main_font.render_to(
+                        self.screen,
+                        (x, item_y),
+                        f"• {item}",
+                        Colors.TEXT_COLOR
+                    )
     
     def draw_text_area(self):
-        """Draw the main text area with message history."""
-        # Adjust text area to account for image area
-        text_rect = pygame.Rect(
-            250,
-            self.padding,
-            self.width - 590,  # Leave room for image
-            self.text_area_height - (2 * self.padding)
+        """Draw the scrollable text area with message history."""
+        pygame.draw.rect(self.screen, Colors.DARKER_GRAY, self.text_area)
+        
+        # Draw messages with scrolling
+        line_height = 25
+        visible_lines = (self.text_area.height - 20) // line_height
+        
+        # Calculate which messages to display based on scroll position
+        start_idx = max(0, len(self.messages) - visible_lines - self.scroll_position)
+        end_idx = min(len(self.messages), start_idx + visible_lines)
+        
+        visible_messages = self.messages[start_idx:end_idx]
+        
+        # Draw scroll indicators if needed
+        if self.scroll_position > 0:
+            # Draw "more above" indicator
+            pygame.draw.polygon(
+                self.screen, 
+                Colors.LIGHT_GRAY,
+                [
+                    (self.text_area.right - 20, self.text_area.top + 10),
+                    (self.text_area.right - 10, self.text_area.top + 20),
+                    (self.text_area.right - 30, self.text_area.top + 20)
+                ]
+            )
+        
+        if self.scroll_position < self.max_scroll_position:
+            # Draw "more below" indicator
+            pygame.draw.polygon(
+                self.screen, 
+                Colors.LIGHT_GRAY,
+                [
+                    (self.text_area.right - 20, self.text_area.bottom - 10),
+                    (self.text_area.right - 10, self.text_area.bottom - 20),
+                    (self.text_area.right - 30, self.text_area.bottom - 20)
+                ]
+            )
+        
+        # Draw scrollbar track
+        pygame.draw.rect(self.screen, Colors.DARK_GRAY, self.scrollbar_track)
+        
+        # Draw scrollbar position indicator (thumb)
+        if self.max_scroll_position > 0:
+            # Calculate thumb position and size
+            scrollbar_height = self.scrollbar_track.height
+            # Make the thumb a bit smaller but still visible
+            thumb_height = max(30, min(100, scrollbar_height * visible_lines / len(self.messages)))
+            
+            # Position is based on current scroll position - FIXED direction
+            # When scroll_position is 0, thumb should be at the bottom (newest messages)
+            # When scroll_position is max, thumb should be at the top (oldest messages)
+            # So we invert the ratio: (1 - scroll_ratio)
+            scroll_ratio = self.scroll_position / self.max_scroll_position if self.max_scroll_position > 0 else 0
+            inverted_ratio = 1.0 - scroll_ratio
+            thumb_pos = self.scrollbar_track.top + (scrollbar_height - thumb_height) * inverted_ratio
+            
+            thumb_rect = pygame.Rect(
+                self.scrollbar_track.x,
+                thumb_pos,
+                self.scrollbar_track.width,
+                thumb_height
+            )
+            
+            # Draw a more elegant scrollbar
+            # First draw a slightly larger rect with the same color as background for rounded effect
+            pygame.draw.rect(self.screen, Colors.DARKER_GRAY, 
+                            (thumb_rect.x - 1, thumb_rect.y - 1, 
+                             thumb_rect.width + 2, thumb_rect.height + 2), 
+                            border_radius=3)
+            
+            # Then draw the actual scrollbar with a softer color
+            scrollbar_color = Colors.LIGHT_GRAY if self.always_show_latest else (180, 180, 220)  # Light blue-gray when manually scrolling
+            pygame.draw.rect(self.screen, scrollbar_color, thumb_rect, border_radius=3)
+        
+        # Draw scroll buttons
+        # Up button
+        pygame.draw.rect(self.screen, Colors.DARK_GRAY, self.scroll_up_button)
+        pygame.draw.polygon(
+            self.screen,
+            Colors.WHITE,
+            [
+                (self.scroll_up_button.centerx, self.scroll_up_button.top + 5),
+                (self.scroll_up_button.left + 5, self.scroll_up_button.bottom - 5),
+                (self.scroll_up_button.right - 5, self.scroll_up_button.bottom - 5)
+            ]
         )
         
-        pygame.draw.rect(self.screen, Colors.DARKER_GRAY, text_rect)
+        # Down button
+        pygame.draw.rect(self.screen, Colors.DARK_GRAY, self.scroll_down_button)
+        pygame.draw.polygon(
+            self.screen,
+            Colors.WHITE,
+            [
+                (self.scroll_down_button.centerx, self.scroll_down_button.bottom - 5),
+                (self.scroll_down_button.left + 5, self.scroll_down_button.top + 5),
+                (self.scroll_down_button.right - 5, self.scroll_down_button.top + 5)
+            ]
+        )
         
         # Draw messages
-        # Calculate how many messages we can display
-        line_height = 25
-        visible_line_count = (text_rect.height - 20) // line_height
-        
-        # Get messages to display
-        visible_messages = self.messages[-visible_line_count:] if len(self.messages) > visible_line_count else self.messages
-        
-        y = text_rect.y + 10
+        y = self.text_area.y + 10
         for message in visible_messages:
-            # Render messages based on type
             self.main_font.render_to(
                 self.screen,
-                (text_rect.x + 10, y),
+                (self.text_area.x + 10, y),
                 message.text,
                 message.color
             )
@@ -295,7 +507,7 @@ class GameUI:
         # Draw label
         self.main_font.render_to(
             self.screen, 
-            (self.padding, self.height - self.input_height - self.padding - 25),
+            (self.padding, self.height - self.input_height - self.padding - 20),
             "What do you want to do?",
             Colors.TEXT_COLOR
         )
@@ -332,7 +544,7 @@ class GameUI:
             self.last_animation_time = current_time
     
     def draw_image_area(self):
-        """Draw the image area and current image if available."""
+        """Draw the larger image area and current image if available."""
         # Draw the background and border
         border_rect = pygame.Rect(
             self.image_area.x - 2,
@@ -344,15 +556,9 @@ class GameUI:
         pygame.draw.rect(self.screen, Colors.DARKER_GRAY, self.image_area)
         
         # Draw scene title
-        title_rect = pygame.Rect(
-            self.image_area.x,
-            self.image_area.y - 30,
-            self.image_area.width,
-            25
-        )
         self.header_font.render_to(
             self.screen,
-            (title_rect.x, title_rect.y),
+            (self.image_area.x + 10, self.image_area.y + 10),
             "CURRENT SCENE",
             Colors.TEXT_COLOR
         )
@@ -372,7 +578,8 @@ class GameUI:
             loading_text = f"Generating image{dots}"
             self.main_font.render_to(
                 self.screen,
-                (self.image_area.x + 10, self.image_area.y + self.image_area.height // 2),
+                (self.image_area.x + (self.image_area.width - 150) // 2, 
+                 self.image_area.y + self.image_area.height // 2),
                 loading_text,
                 Colors.TEXT_COLOR
             )
@@ -380,7 +587,8 @@ class GameUI:
             # Show placeholder text
             self.main_font.render_to(
                 self.screen,
-                (self.image_area.x + 10, self.image_area.y + self.image_area.height // 2),
+                (self.image_area.x + (self.image_area.width - 250) // 2, 
+                 self.image_area.y + self.image_area.height // 2),
                 "Scene image will appear here",
                 Colors.GRAY
             )
@@ -389,15 +597,17 @@ class GameUI:
         """Update the entire display with current game state."""
         self.screen.fill(Colors.BLACK)
         
-        # Draw all UI components
+        # Draw all UI components in the new layout
+        self.draw_image_area()
         self.draw_inventory(game_state.get('inventory', []))
         self.draw_text_area()
+        self.draw_input_box()
+        
+        # Draw status bars on top of image
         self.draw_status_bars(
             game_state.get('health', 100),
             game_state.get('karma', 0)
         )
-        self.draw_image_area()
-        self.draw_input_box()
         
         pygame.display.flip()
         self.clock.tick(self.fps)

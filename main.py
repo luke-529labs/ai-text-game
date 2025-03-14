@@ -4,6 +4,7 @@ import re
 import os
 import requests
 import pygame
+import threading
 from typing import Dict, List, Optional, Any, Tuple
 from game_ui import GameUI
 from image_generator import ImageGenerator
@@ -326,6 +327,10 @@ class Game:
         # Initialize image generator if API key is available
         self.image_generator = ImageGenerator(api_key) if api_key else None
         self.image_generation_enabled = bool(api_key)
+        
+        # For async image generation
+        self.image_thread = None
+        self.is_generating_image = False
     
     def start_new_game(self):
         """Start a new game session."""
@@ -360,6 +365,7 @@ class Game:
                         self.ui.add_player_message(command)
                         self._process_turn()
                 
+            # Update display every frame
             self.ui.update_display(self.state.to_dict() if self.state else {})
             
         self.ui.cleanup()
@@ -379,7 +385,7 @@ class Game:
         # Extract possible starting items from the initial situation
         self._extract_initial_items(situation)
         
-        # Generate initial image
+        # Generate initial image (async)
         if self.image_generation_enabled:
             self._generate_scene_image(f"A scene depicting: {self.state.chosen_setting}. {situation}")
     
@@ -411,7 +417,19 @@ Return only a comma-separated list of items, nothing else.
             return
             
         self.ui.add_system_message("Generating scene image...")
+        self.ui.is_loading_image = True
         
+        # Start image generation in a separate thread
+        self.is_generating_image = True
+        self.image_thread = threading.Thread(
+            target=self._generate_image_thread, 
+            args=(prompt,)
+        )
+        self.image_thread.daemon = True  # Thread will exit when main program exits
+        self.image_thread.start()
+    
+    def _generate_image_thread(self, prompt: str):
+        """Thread function to generate image in the background."""
         try:
             # Generate image
             image = self.image_generator.generate_image(prompt)
@@ -420,15 +438,20 @@ Return only a comma-separated list of items, nothing else.
                 # Scale image to fit display area
                 scaled_image = self._scale_image_to_fit(image)
                 
-                # Update UI with new image
+                # Update UI with new image (this will happen in the background)
                 self.state.current_image = scaled_image
                 self.ui.current_image = scaled_image
+                self.ui.is_loading_image = False
                 self.ui.add_system_message("Scene image updated.")
             else:
+                self.ui.is_loading_image = False
                 self.ui.add_system_message("Failed to generate scene image.")
         except Exception as e:
             print(f"Error generating scene image: {e}")
+            self.ui.is_loading_image = False
             self.ui.add_system_message("Error generating scene image.")
+        finally:
+            self.is_generating_image = False
     
     def _scale_image_to_fit(self, image: pygame.Surface) -> pygame.Surface:
         """Scale image to fit in the UI's image area while maintaining aspect ratio."""
@@ -604,9 +627,11 @@ END_LLM_GENERATED_CONTENT
             items_str = ", ".join(removed_items)
             self.ui.add_system_message(f"Removed from inventory: {items_str}")
         
-        # Generate new scene image if image prompt is available
+        # Generate new scene image asynchronously if image prompt is available
         if self.image_generation_enabled and self.state.image_prompt:
-            self._generate_scene_image(self.state.image_prompt)
+            # Make sure we're not already generating an image
+            if not self.is_generating_image:
+                self._generate_scene_image(self.state.image_prompt)
 
 
 if __name__ == "__main__":
