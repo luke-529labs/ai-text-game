@@ -52,11 +52,13 @@ class StoryGenerator:
     def generate_initial_situation(self, setting: str) -> str:
         """Generate the initial situation for a new life."""
         prompt = """
-You are a dungeon master for a text based RPG. You are given a setting and you need to generate a new situation for the player. 
+You are a narrative guide for an immersive text adventure. Given a setting, create an engaging initial situation for the player.
 The player has just reincarnated into a new life and wakes up with no memories in the following setting: {setting}. 
-Give the player a brief intro based on the setting and a few directions that they might go with their new life. Be consise yet descriptive and ensure there are some unique choices which could lead to action.
+Describe their immediate surroundings and circumstances, providing 2-3 clear potential paths or choices that naturally fit the setting.
+Be concise yet descriptive, and ensure the choices feel authentic to the environment.
 
-IMPORTANT: Include at least one item that the player can find or already has at the beginning of this new life (e.g., a tool, weapon, key item, or clothing that fits the setting). This will be added to their starting inventory.
+IMPORTANT: Include at least one item that the player would logically have or could immediately find in this setting 
+(e.g., appropriate clothing, tools, or objects that fit the context). This will be added to their starting inventory.
 
 Everything should be written in the second person. Please return only a player-facing message and nothing else.
 """.format(setting=setting)
@@ -64,25 +66,40 @@ Everything should be written in the second person. Please return only a player-f
 
     def generate_narrative_element(self, state: GameState) -> Dict[str, str]:
         """Generate a context-aware narrative element to advance the story."""
-        # Occasionally focus on inventory-related elements
-        if random.random() < 0.3 and state.turn > 1:  # 30% chance after first turn
+        # Analyze the last player action to determine the most appropriate element type
+        action_lower = state.last_player_message.lower()
+        
+        # Determine element type based on player's last action
+        if any(word in action_lower for word in ['talk', 'ask', 'speak', 'say', 'tell', 'respond']):
+            element_type = "DIALOGUE"
+        elif any(word in action_lower for word in ['attack', 'fight', 'punch', 'shoot', 'defend', 'dodge', 'run']):
+            element_type = "ACTION"
+        elif any(word in action_lower for word in ['open', 'enter', 'go', 'walk', 'move', 'explore', 'look', 'search']):
+            element_type = "EXPLORATION"
+        elif any(word in action_lower for word in ['use', 'take', 'grab', 'pick', 'drop', 'give', 'hold', 'wear']):
             element_type = "ITEM"
         else:
-            element_type = random.choice(["CHOICE", "CHARACTER", "ACTION"])
+            # If no specific action type is detected, choose based on context and recent events
+            element_type = random.choice(["DIALOGUE", "EXPLORATION", "ITEM", "ACTION"])
         
         prompt = """
-You are a narrative designer for a text-based RPG. Based on the current context, generate a {element_type}.
+You are crafting the next story beat in an immersive text adventure. Based on the current context and the player's last action, 
+create a natural progression that maintains narrative consistency and advances the story.
 
 Current context:
-Last gamemaster message: {last_message}
-Player's last action: {last_action}
-Current inventory: {inventory}
-Current location/situation: {setting}
+Setting: {setting}
+Last story beat: {last_message}
+Player's action: {last_action}
+Available items: {inventory}
+Story so far: {turn_summary}
 Current turn: {turn}
+
+Action type: {element_type}
 
 {specific_instructions}
 
-Return only the narrative element, nothing else. Be concise but compelling.
+Your response should feel like a natural consequence of the player's action and previous events. 
+Return only the story beat, nothing else. Be specific and create clear paths forward.
 """.format(
             element_type=element_type,
             last_message=state.last_gamemaster_message,
@@ -90,11 +107,12 @@ Return only the narrative element, nothing else. Be concise but compelling.
             inventory=state.inventory,
             setting=state.chosen_setting,
             turn=state.turn,
+            turn_summary=state.turn_summary,
             specific_instructions={
-                "CHOICE": "Create a dilemma or choice the player must face. Format: 'You must decide: [brief compelling choice]'",
-                "CHARACTER": "Introduce a new character with a line of dialogue. Format: '[Character description]: \"[intriguing dialogue]\"'",
-                "ACTION": "Create a sudden action that demands player response. Format: 'Suddenly, [unexpected event or action]'",
-                "ITEM": "Create a scenario involving inventory. Either: 1) A new item the player could find/receive, 2) A way to use an existing item, or 3) A challenge requiring a specific item. Format: '[Brief item-focused scenario]'"
+                "DIALOGUE": "Create a character's response that feels natural to the setting and advances the story. Format: '[Character description] responds: \"[contextually appropriate dialogue that moves the story forward]\"'",
+                "ACTION": "Describe the immediate outcome of the action and its consequences. Format: '[Detailed outcome] Your next options: [2-3 logical choices based on the outcome]'",
+                "EXPLORATION": "Describe what the player discovers, maintaining consistency with the setting. Format: '[Discovery description] You notice: [1-2 interesting elements that fit the environment]'",
+                "ITEM": "Create a realistic scenario involving items that fits the setting. Format: '[Item interaction and its immediate effects]'"
             }[element_type]
         )
         
@@ -111,10 +129,10 @@ class TurbulenceSystem:
     
     def should_add_turbulence(self, turn: int) -> bool:
         """Determine if turbulence should be added based on turn number."""
-        if turn < 1:
+        if turn < 2:  # Give players more time to establish themselves
             return False
         
-        # Turbulence chance increases with turns
+        # Turbulence chance increases with turns but caps at 30%
         if turn <= 5:
             chance = 0.10
         elif turn <= 10:
@@ -144,25 +162,31 @@ class TurbulenceSystem:
     def _determine_lethality(self, state: GameState, lethal_chance: float) -> bool:
         """Determine if the turbulence should be lethal."""
         prompt = """
-You are a fate-determining AI for a text-based RPG. Based on the following context, determine if this turbulence event should be lethal.
+You are determining the outcome of a sudden event in an immersive text adventure. Based on the following context, 
+decide if this event should result in a critical outcome.
 
-Current game state:
+Current story state:
+- Setting: {setting}
+- Recent events: {turn_summary}
 - Player's karma: {karma} (-100 to 100)
 - Current turn: {turn}
 - Player's health: {health}
-- Current inventory: {inventory}
+- Available items: {inventory}
 - Last action: {last_action}
 
-Mathematical chance of lethality based on karma: {lethal_chance:.1%}
+Mathematical chance of critical outcome based on karma: {lethal_chance:.1%}
 
-Additional factors to consider:
-1. Player's recent actions and choices
-2. Current story context
-3. Dramatic timing
-4. Current inventory items that might help survival
+Consider:
+1. The current setting and situation
+2. Recent story developments
+3. Available resources or items that could help
+4. Dramatic timing and narrative impact
+5. Player's previous choices and their consequences
 
-Should this turbulence event be lethal? Respond with only 'YES' or 'NO'.
+Should this event be critical? Respond with only 'YES' or 'NO'.
 """.format(
+            setting=state.chosen_setting,
+            turn_summary=state.turn_summary,
             karma=state.karma,
             turn=state.turn,
             health=state.health,
@@ -176,31 +200,37 @@ Should this turbulence event be lethal? Respond with only 'YES' or 'NO'.
     def _generate_event_description(self, state: GameState, is_lethal: bool) -> str:
         """Generate the description of the turbulence event."""
         prompt = """
-You are a dungeon master creating a dynamic event in a text-based RPG. Generate a context-appropriate conflict or challenge based on the current situation.
+You are creating a sudden event in an immersive text adventure. Generate an unexpected but contextually appropriate 
+development that creates tension or challenge based on the current situation.
 
 Current context:
-Last gamemaster message: {last_message}
+Setting: {setting}
+Recent events: {turn_summary}
+Last story beat: {last_message}
 Player's last action: {last_action}
-Current inventory: {inventory}
+Available items: {inventory}
 Current health: {health}
 Karma: {karma}
 
 {lethality_instruction}
 
-Generate a single sentence describing a sudden event that creates conflict or danger. The event should:
-1. Feel natural within the current context
-2. Create immediate tension
-3. Connect to the current story if possible
-4. Not reveal if it's lethal or not in its description
+Create a single sentence describing a sudden event that:
+1. Feels natural within the current setting
+2. Connects to recent story developments
+3. Creates immediate tension or urgency
+4. Could reasonably lead to the required outcome
+5. Doesn't reveal its critical/non-critical nature
 
 Return only the event description, nothing else.
 """.format(
+            setting=state.chosen_setting,
+            turn_summary=state.turn_summary,
             last_message=state.last_gamemaster_message,
             last_action=state.last_player_message,
             inventory=state.inventory,
             health=state.health,
             karma=state.karma,
-            lethality_instruction="IMPORTANT: This event MUST result in the player's death this turn." if is_lethal else "This event should create significant danger but survival should be possible."
+            lethality_instruction="IMPORTANT: This event must lead to a critical outcome this turn." if is_lethal else "This event should create significant challenge but allow for potential survival."
         )
         
         return self.llm.invoke(prompt).content.strip()
@@ -650,41 +680,70 @@ Return only a comma-separated list of items, nothing else.
     def _build_turn_prompt(self, narrative_element: Dict[str, str], inventory_str: str,
                           turbulence: str, turbulence_instruction: str) -> str:
         """Build the prompt for the turn."""
-        # Add inventory-specific instructions based on the narrative element type
-        inventory_instruction = ""
-        if narrative_element['type'] == "ITEM":
-            inventory_instruction = """
-INVENTORY FOCUS: This turn should meaningfully interact with inventory items. Do ONE of the following:
-1. Add a new item to the player's inventory if appropriate
-2. Create an opportunity to use an existing item in the inventory
-3. Create a situation where an item would be useful (but they may not have it yet)
+        # Add specific instructions based on the narrative element type
+        element_type_instructions = {
+            "DIALOGUE": """
+DIALOGUE FOCUS: Your response must:
+1. Include the character's direct response to the player
+2. Maintain the character's personality and knowledge
+3. Advance the plot through the conversation
+4. Provide clear conversational options or next steps
+""",
+            "ACTION": """
+ACTION FOCUS: Your response must:
+1. Describe the immediate outcome of the action
+2. Account for weapons/items used (or lack thereof)
+3. Update health appropriately based on success/failure
+4. Present clear follow-up tactical options
+""",
+            "EXPLORATION": """
+EXPLORATION FOCUS: Your response must:
+1. Vividly describe what the player discovers
+2. Include at least one interactive element
+3. Maintain spatial consistency with previous descriptions
+4. Create opportunities for meaningful choices
+""",
+            "ITEM": """
+ITEM FOCUS: Your response must:
+1. Clearly describe how items are used or acquired
+2. Update inventory appropriately
+3. Show meaningful consequences of item use
+4. Create future opportunities for item use
 """
-        
+        }.get(narrative_element['type'], "")
+
         return """
 You are a skilled dungeon master for a text-based RPG. Your job is to create an engaging and dynamic story that responds to player choices while maintaining appropriate challenge and consequences.
 
-NARRATIVE ELEMENT: {narrative_element}
+CURRENT SCENE CONTEXT:
+Location: {setting}
+Recent events: {turn_summary}
+Last gamemaster message: {last_gamemaster_message}
+Player's action: {last_player_message}
+
+NARRATIVE ELEMENT TO INCORPORATE: {narrative_element}
 ELEMENT TYPE: {element_type}
 
-IMPORTANT RULES:
-1. Your response MUST incorporate and directly address the narrative element above
-2. Keep the story moving forward - don't stay in one place or situation too long
-3. Actions should have clear consequences for health and karma
-4. Maintain narrative continuity with previous events
-5. Be concise but descriptive
-6. For inventory items, use simple comma-separated text (e.g., "rusty sword, health potion, map")
-7. Regularly create opportunities for players to find, use, or lose inventory items{inventory_instruction}
+CRITICAL REQUIREMENTS:
+1. MAINTAIN CONTEXT: Your response must directly follow from the player's action and maintain consistency with the current scene and previous events
+2. CLEAR OUTCOMES: Describe specific consequences of the player's action
+3. FORWARD MOMENTUM: Always end with clear options, discoveries, or next steps
+4. SCENE CONSISTENCY: Keep track of and reference the physical space and characters previously mentioned
+5. MEANINGFUL CHOICES: Present interesting decisions that affect the story
 
-IMPORTANT: You must respond in the exact format specified below. Do not deviate from this format:
+{element_type_instructions}
 
-The player is named {name}, they have {health}/100 health and the following items in their inventory: {inventory}. Their karma is {karma} (scale of -100 to 100) which will determine their luck and change based on their choices.
-It is turn {turn}. 
+TECHNICAL RULES:
+1. Keep responses concise but descriptive
+2. Use simple comma-separated text for inventory
+3. Health and karma changes should reflect action outcomes
+4. Image prompts should capture the current scene{inventory_instruction}
 
-Here is context of the last turn:
-Gamemaster: {last_gamemaster_message}
-Player: {last_player_message}{turbulence}
-
-Here is a summary of the player's turns so far: {turn_summary}
+The player {name} has:
+- Health: {health}/100
+- Karma: {karma} (-100 to 100)
+- Inventory: {inventory}
+- Current turn: {turn}{turbulence}
 
 {turbulence_instruction}
 
@@ -706,11 +765,13 @@ END_LLM_GENERATED_CONTENT
             last_gamemaster_message=self.state.last_gamemaster_message,
             last_player_message=self.state.last_player_message,
             turn_summary=self.state.turn_summary,
+            setting=self.state.chosen_setting,
             turbulence=turbulence,
             turbulence_instruction=turbulence_instruction,
             narrative_element=narrative_element['content'],
             element_type=narrative_element['type'],
-            inventory_instruction=inventory_instruction
+            element_type_instructions=element_type_instructions,
+            inventory_instruction="" if narrative_element['type'] == "ITEM" else "\n5. Regularly create opportunities for inventory interaction"
         )
     
     def _update_game_state(self, parsed_response: Dict[str, Any]):

@@ -69,14 +69,23 @@ class GameUI:
         # UI element dimensions
         self.padding = 10
         self.input_height = 40
+        self.title_height = 40  # Height reserved for scene title
         
         # New layout with larger image and text areas
-        # Image area now takes up right half of screen
+        # Image area now takes up right half of screen, with space for title
         self.image_area = pygame.Rect(
+            self.width // 2 + self.padding,
+            self.padding + self.title_height,  # Move down by title height
+            (self.width // 2) - (self.padding * 2),
+            self.height - self.input_height - (self.padding * 3) - self.title_height  # Adjust height
+        )
+        
+        # Title area above image
+        self.title_area = pygame.Rect(
             self.width // 2 + self.padding,
             self.padding,
             (self.width // 2) - (self.padding * 2),
-            self.height - self.input_height - (self.padding * 3)
+            self.title_height
         )
         
         # Small inventory in top-left corner
@@ -545,20 +554,25 @@ class GameUI:
     
     def draw_image_area(self):
         """Draw the larger image area and current image if available."""
-        # Draw the background and border
+        # Draw the background and border for both title and image areas
         border_rect = pygame.Rect(
             self.image_area.x - 2,
-            self.image_area.y - 2,
+            self.title_area.y - 2,  # Start from title area
             self.image_area.width + 4,
-            self.image_area.height + 4
+            self.image_area.height + self.title_height + 4  # Include title height
         )
         pygame.draw.rect(self.screen, Colors.LIGHT_GRAY, border_rect)
+        
+        # Draw title area background
+        pygame.draw.rect(self.screen, Colors.DARK_GRAY, self.title_area)
+        
+        # Draw image area background
         pygame.draw.rect(self.screen, Colors.DARKER_GRAY, self.image_area)
         
-        # Draw scene title
+        # Draw scene title in title area
         self.header_font.render_to(
             self.screen,
-            (self.image_area.x + 10, self.image_area.y + 10),
+            (self.title_area.x + 10, self.title_area.y + (self.title_height - 24) // 2),  # Center vertically
             "CURRENT SCENE",
             Colors.TEXT_COLOR
         )
