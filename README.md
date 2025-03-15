@@ -12,7 +12,6 @@ An immersive text-based role-playing game powered by AI that combines rich narra
 - **Inventory Management**: Collect and use items throughout your adventure
 - **Reincarnation Mechanic**: When you die, you're reborn into a new situation, carrying forward your experiences
 - **Dynamic Events**: Unexpected encounters and challenges that test your adaptability
-- **Modern UI**: Sleek interface with scrollable text history, visual health/karma indicators, and more
 
 ## Requirements
 
@@ -24,7 +23,7 @@ An immersive text-based role-playing game powered by AI that combines rich narra
 
 1. Clone this repository:
    ```
-   git clone <repository-url>
+   git clone https://github.com/luke-529labs/ai-text-game
    cd ai_text_game
    ```
 
@@ -79,21 +78,11 @@ The game will occasionally introduce:
 ### Turbulence Events
 Unexpected challenges that test your character. Their difficulty and lethality are influenced by your karma and past actions.
 
-## Development
-
-The game consists of several key components:
-
-- `main.py`: Core game logic and loop
-- `game_ui.py`: PyGame-based user interface
-- `image_generator.py`: Handles AI image generation
-- `situations.txt`: Contains possible starting scenarios
 
 ## Troubleshooting
 
-### Image Generation Issues
 - Ensure your OpenAI API key is valid and has sufficient credits
 - Check your internet connection
-- The game will continue to work without images if generation fails
 
 ## Credits
 
